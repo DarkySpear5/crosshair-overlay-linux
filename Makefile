@@ -3,7 +3,7 @@ PKGS = gtk+-3.0 x11 xext json-glib-1.0
 CFLAGS = -Wall -Wextra -g $(shell pkg-config --cflags $(PKGS))
 LDFLAGS = $(shell pkg-config --libs $(PKGS))
 
-SRC = src/main.c
+SRC = src/main.c src/config.c
 OBJ = $(SRC:.c=.o)
 BIN = bin/crosshair-overlay
 
