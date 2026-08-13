@@ -2,11 +2,13 @@
 #include "config.h"
 #include "overlay_window.h"
 #include "tray.h"
+#include "options_window.h"
 
 typedef struct {
     CrosshairConfig cfg;
     OverlayWindow *overlay;
     TrayIcon *tray;
+    OptionsWindow *options;
     char *config_path;
 } AppState;
 
@@ -27,8 +29,8 @@ static void on_toggle(gpointer user_data) {
 }
 
 static void on_options(gpointer user_data) {
-    (void)user_data;
-    g_message("Options… clicked (options window not implemented yet)");
+    AppState *app = (AppState *)user_data;
+    options_window_present(app->options);
 }
 
 static void on_quit(gpointer user_data) {
@@ -51,6 +53,8 @@ int main(int argc, char **argv) {
 
     app.overlay = overlay_window_new();
     overlay_window_apply_config(app.overlay, &app.cfg);
+
+    app.options = options_window_new(&app.cfg, app.overlay, app.config_path);
 
     app.tray = tray_icon_new(app.cfg.enabled, on_toggle, on_options, on_quit, &app);
 
