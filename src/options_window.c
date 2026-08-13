@@ -1,5 +1,6 @@
 #include "options_window.h"
 #include "hotkey.h"
+#include <json-glib/json-glib.h>
 
 struct _OptionsWindow {
     GtkWidget *window;
@@ -222,6 +223,104 @@ static void on_rebind_clicked(GtkButton *button, gpointer user_data) {
     gtk_widget_grab_focus(ow->window);
 }
 
+static void on_export_clicked(GtkButton *button, gpointer user_data) {
+    (void)button;
+    OptionsWindow *ow = (OptionsWindow *)user_data;
+
+    GtkWidget *dialog = gtk_file_chooser_dialog_new("Export Crosshair Preset", GTK_WINDOW(ow->window),
+        GTK_FILE_CHOOSER_ACTION_SAVE,
+        "_Cancel", GTK_RESPONSE_CANCEL,
+        "_Save", GTK_RESPONSE_ACCEPT,
+        NULL);
+    gtk_file_chooser_set_do_overwrite_confirmation(GTK_FILE_CHOOSER(dialog), TRUE);
+    gtk_file_chooser_set_current_name(GTK_FILE_CHOOSER(dialog), "crosshair-preset.json");
+
+    if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
+        char *filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
+        GError *error = NULL;
+        if (!config_save(ow->cfg, filename, &error)) {
+            GtkWidget *err_dialog = gtk_message_dialog_new(GTK_WINDOW(ow->window), GTK_DIALOG_MODAL,
+                GTK_MESSAGE_ERROR, GTK_BUTTONS_OK, "Failed to export preset: %s",
+                error ? error->message : "unknown error");
+            gtk_dialog_run(GTK_DIALOG(err_dialog));
+            gtk_widget_destroy(err_dialog);
+            g_clear_error(&error);
+        }
+        g_free(filename);
+    }
+    gtk_widget_destroy(dialog);
+}
+
+static void refresh_all_widgets_from_cfg(OptionsWindow *ow) {
+    ow->updating_ui = TRUE;
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(ow->x_spin), ow->cfg->offset_x);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(ow->y_spin), ow->cfg->offset_y);
+    gtk_spin_button_set_value(GTK_SPIN_BUTTON(ow->size_spin), ow->cfg->size_percent);
+    gtk_combo_box_set_active(GTK_COMBO_BOX(ow->monitor_combo), ow->cfg->monitor);
+    gtk_combo_box_set_active(GTK_COMBO_BOX(ow->shape_combo), (int)ow->cfg->shape);
+    ow->updating_ui = FALSE;
+    refresh_color_widgets(ow);
+    refresh_hotkey_label(ow);
+}
+
+static void on_import_clicked(GtkButton *button, gpointer user_data) {
+    (void)button;
+    OptionsWindow *ow = (OptionsWindow *)user_data;
+
+    GtkWidget *dialog = gtk_file_chooser_dialog_new("Import Crosshair Preset", GTK_WINDOW(ow->window),
+        GTK_FILE_CHOOSER_ACTION_OPEN,
+        "_Cancel", GTK_RESPONSE_CANCEL,
+        "_Open", GTK_RESPONSE_ACCEPT,
+        NULL);
+
+    if (gtk_dialog_run(GTK_DIALOG(dialog)) == GTK_RESPONSE_ACCEPT) {
+        char *filename = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
+
+        if (!g_file_test(filename, G_FILE_TEST_EXISTS)) {
+            GtkWidget *err_dialog = gtk_message_dialog_new(GTK_WINDOW(ow->window), GTK_DIALOG_MODAL,
+                GTK_MESSAGE_ERROR, GTK_BUTTONS_OK, "File does not exist.");
+            gtk_dialog_run(GTK_DIALOG(err_dialog));
+            gtk_widget_destroy(err_dialog);
+        } else {
+            CrosshairConfig imported;
+            GError *error = NULL;
+            gboolean parse_ok = TRUE;
+
+            JsonParser *parser = json_parser_new();
+            if (!json_parser_load_from_file(parser, filename, &error)) {
+                parse_ok = FALSE;
+            }
+            g_object_unref(parser);
+
+            if (!parse_ok) {
+                GtkWidget *err_dialog = gtk_message_dialog_new(GTK_WINDOW(ow->window), GTK_DIALOG_MODAL,
+                    GTK_MESSAGE_ERROR, GTK_BUTTONS_OK, "Failed to import preset: invalid JSON.\n%s",
+                    error ? error->message : "");
+                gtk_dialog_run(GTK_DIALOG(err_dialog));
+                gtk_widget_destroy(err_dialog);
+                g_clear_error(&error);
+            } else {
+                config_load(&imported, filename, &error);
+                g_clear_error(&error);
+
+                for (int i = 0; i < ow->cfg->hotkey_count; i++) {
+                    g_free(ow->cfg->hotkey_keys[i]);
+                }
+                /* Struct copy transfers ownership of imported's heap-allocated
+                   hotkey_keys strings into *ow->cfg. Do not call
+                   config_free_contents(&imported) - that would free strings
+                   that ow->cfg now also points to. */
+                *ow->cfg = imported;
+
+                apply_and_save(ow);
+                refresh_all_widgets_from_cfg(ow);
+            }
+        }
+        g_free(filename);
+    }
+    gtk_widget_destroy(dialog);
+}
+
 static void populate_monitors(OptionsWindow *ow) {
     GdkDisplay *display = gdk_display_get_default();
     int n = gdk_display_get_n_monitors(display);
@@ -320,6 +419,16 @@ OptionsWindow *options_window_new(CrosshairConfig *cfg, OverlayWindow *overlay, 
 
     g_signal_connect(ow->window, "key-press-event", G_CALLBACK(on_capture_key_press), ow);
     g_signal_connect(ow->window, "key-release-event", G_CALLBACK(on_capture_key_release), ow);
+
+    GtkWidget *io_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    GtkWidget *import_button = gtk_button_new_with_label("Import…");
+    GtkWidget *export_button = gtk_button_new_with_label("Export…");
+    g_signal_connect(import_button, "clicked", G_CALLBACK(on_import_clicked), ow);
+    g_signal_connect(export_button, "clicked", G_CALLBACK(on_export_clicked), ow);
+    gtk_box_pack_start(GTK_BOX(io_box), import_button, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(io_box), export_button, FALSE, FALSE, 0);
+    gtk_grid_attach(GTK_GRID(grid), io_box, 0, row, 2, 1);
+    row++;
 
     refresh_hotkey_label(ow);
     refresh_color_widgets(ow);
