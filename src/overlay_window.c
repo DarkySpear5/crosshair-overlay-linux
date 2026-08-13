@@ -1,5 +1,6 @@
 #include "overlay_window.h"
 #include <gdk/gdkx.h>
+#include <gdk-pixbuf/gdk-pixbuf.h>
 #include <X11/extensions/shape.h>
 #include <math.h>
 
@@ -7,26 +8,78 @@ struct _OverlayWindow {
     GtkWidget *window;
     CrosshairConfig cfg;
     gboolean shaped_once;
+    GdkPixbuf *custom_pixbuf; /* cached decode of cfg.custom_png_base64, NULL if none/invalid */
 };
 
-static int shape_bounding_size(const CrosshairConfig *cfg) {
+static void refresh_custom_pixbuf(OverlayWindow *ow) {
+    if (ow->custom_pixbuf) {
+        g_object_unref(ow->custom_pixbuf);
+        ow->custom_pixbuf = NULL;
+    }
+    if (ow->cfg.shape != SHAPE_CUSTOM_PNG || !ow->cfg.custom_png_base64 || !ow->cfg.custom_png_base64[0]) {
+        return;
+    }
+
+    gsize decoded_len = 0;
+    guchar *decoded = g_base64_decode(ow->cfg.custom_png_base64, &decoded_len);
+    if (!decoded) return;
+
+    GdkPixbufLoader *loader = gdk_pixbuf_loader_new();
+    GError *error = NULL;
+    if (gdk_pixbuf_loader_write(loader, decoded, decoded_len, &error) &&
+        gdk_pixbuf_loader_close(loader, &error)) {
+        GdkPixbuf *pixbuf = gdk_pixbuf_loader_get_pixbuf(loader);
+        if (pixbuf) {
+            ow->custom_pixbuf = g_object_ref(pixbuf);
+        }
+    } else {
+        g_warning("Failed to decode custom crosshair PNG: %s", error ? error->message : "unknown error");
+    }
+    g_clear_error(&error);
+    g_object_unref(loader);
+    g_free(decoded);
+}
+
+static int shape_bounding_size(OverlayWindow *ow) {
+    const CrosshairConfig *cfg = &ow->cfg;
     double scale = cfg->size_percent / 100.0;
     double half;
+    double pad = 4;
     switch (cfg->shape) {
         case SHAPE_CROSS:
             half = (cfg->cross.length + cfg->cross.gap) * scale;
+            if (cfg->cross.outline_enabled) pad += cfg->cross.outline_thickness * scale * 2.0;
             break;
         case SHAPE_DOT:
             half = cfg->dot.radius * scale;
+            if (cfg->dot.outline_enabled) pad += cfg->dot.outline_thickness * scale;
             break;
         case SHAPE_CIRCLE:
             half = (cfg->circle.radius + cfg->circle.thickness) * scale;
+            if (cfg->circle.outline_enabled) pad += cfg->circle.outline_thickness * scale * 2.0;
             break;
+        case SHAPE_CUSTOM_PNG: {
+            int w = ow->custom_pixbuf ? gdk_pixbuf_get_width(ow->custom_pixbuf) : 16;
+            int h = ow->custom_pixbuf ? gdk_pixbuf_get_height(ow->custom_pixbuf) : 16;
+            half = (MAX(w, h) / 2.0) * scale;
+            break;
+        }
         default:
             half = 10;
     }
-    int size = (int)ceil(half * 2.0) + 4;
+    int size = (int)ceil(half * 2.0) + (int)ceil(pad);
     return size < 8 ? 8 : size;
+}
+
+static void build_cross_path(cairo_t *cr, double cx, double cy, double len, double gap) {
+    cairo_move_to(cr, cx - gap - len, cy);
+    cairo_line_to(cr, cx - gap, cy);
+    cairo_move_to(cr, cx + gap, cy);
+    cairo_line_to(cr, cx + gap + len, cy);
+    cairo_move_to(cr, cx, cy - gap - len);
+    cairo_line_to(cr, cx, cy - gap);
+    cairo_move_to(cr, cx, cy + gap);
+    cairo_line_to(cr, cx, cy + gap + len);
 }
 
 static gboolean on_draw(GtkWidget *widget, cairo_t *cr, gpointer user_data) {
@@ -48,23 +101,32 @@ static gboolean on_draw(GtkWidget *widget, cairo_t *cr, gpointer user_data) {
             double len = ow->cfg.cross.length * scale;
             double gap = ow->cfg.cross.gap * scale;
             double thick = ow->cfg.cross.thickness * scale;
-            cairo_set_source_rgba(cr, ow->cfg.cross.r, ow->cfg.cross.g, ow->cfg.cross.b, ow->cfg.cross.opacity);
-            cairo_set_line_width(cr, thick);
             cairo_set_line_cap(cr, CAIRO_LINE_CAP_BUTT);
 
-            cairo_move_to(cr, cx - gap - len, cy);
-            cairo_line_to(cr, cx - gap, cy);
-            cairo_move_to(cr, cx + gap, cy);
-            cairo_line_to(cr, cx + gap + len, cy);
-            cairo_move_to(cr, cx, cy - gap - len);
-            cairo_line_to(cr, cx, cy - gap);
-            cairo_move_to(cr, cx, cy + gap);
-            cairo_line_to(cr, cx, cy + gap + len);
+            if (ow->cfg.cross.outline_enabled) {
+                double outline_thick = thick + 2.0 * ow->cfg.cross.outline_thickness * scale;
+                cairo_set_source_rgba(cr, ow->cfg.cross.outline_r, ow->cfg.cross.outline_g,
+                                      ow->cfg.cross.outline_b, ow->cfg.cross.opacity);
+                cairo_set_line_width(cr, outline_thick);
+                build_cross_path(cr, cx, cy, len, gap);
+                cairo_stroke(cr);
+            }
+
+            cairo_set_source_rgba(cr, ow->cfg.cross.r, ow->cfg.cross.g, ow->cfg.cross.b, ow->cfg.cross.opacity);
+            cairo_set_line_width(cr, thick);
+            build_cross_path(cr, cx, cy, len, gap);
             cairo_stroke(cr);
             break;
         }
         case SHAPE_DOT: {
             double r = ow->cfg.dot.radius * scale;
+            if (ow->cfg.dot.outline_enabled) {
+                double outline_r = r + ow->cfg.dot.outline_thickness * scale;
+                cairo_set_source_rgba(cr, ow->cfg.dot.outline_r, ow->cfg.dot.outline_g,
+                                      ow->cfg.dot.outline_b, ow->cfg.dot.opacity);
+                cairo_arc(cr, cx, cy, outline_r, 0, 2 * G_PI);
+                cairo_fill(cr);
+            }
             cairo_set_source_rgba(cr, ow->cfg.dot.r, ow->cfg.dot.g, ow->cfg.dot.b, ow->cfg.dot.opacity);
             cairo_arc(cr, cx, cy, r, 0, 2 * G_PI);
             cairo_fill(cr);
@@ -73,10 +135,32 @@ static gboolean on_draw(GtkWidget *widget, cairo_t *cr, gpointer user_data) {
         case SHAPE_CIRCLE: {
             double r = ow->cfg.circle.radius * scale;
             double thick = ow->cfg.circle.thickness * scale;
+            if (ow->cfg.circle.outline_enabled) {
+                double outline_thick = thick + 2.0 * ow->cfg.circle.outline_thickness * scale;
+                cairo_set_source_rgba(cr, ow->cfg.circle.outline_r, ow->cfg.circle.outline_g,
+                                      ow->cfg.circle.outline_b, ow->cfg.circle.opacity);
+                cairo_set_line_width(cr, outline_thick);
+                cairo_arc(cr, cx, cy, r, 0, 2 * G_PI);
+                cairo_stroke(cr);
+            }
             cairo_set_source_rgba(cr, ow->cfg.circle.r, ow->cfg.circle.g, ow->cfg.circle.b, ow->cfg.circle.opacity);
             cairo_set_line_width(cr, thick);
             cairo_arc(cr, cx, cy, r, 0, 2 * G_PI);
             cairo_stroke(cr);
+            break;
+        }
+        case SHAPE_CUSTOM_PNG: {
+            if (ow->custom_pixbuf) {
+                int pw = gdk_pixbuf_get_width(ow->custom_pixbuf);
+                int ph = gdk_pixbuf_get_height(ow->custom_pixbuf);
+                cairo_save(cr);
+                cairo_translate(cr, cx - (pw * scale) / 2.0, cy - (ph * scale) / 2.0);
+                cairo_scale(cr, scale, scale);
+                gdk_cairo_set_source_pixbuf(cr, ow->custom_pixbuf, 0, 0);
+                cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_NEAREST);
+                cairo_paint(cr);
+                cairo_restore(cr);
+            }
             break;
         }
     }
@@ -95,7 +179,7 @@ static void make_click_through(GtkWidget *widget) {
 }
 
 static void reposition(OverlayWindow *ow) {
-    int size = shape_bounding_size(&ow->cfg);
+    int size = shape_bounding_size(ow);
     gtk_window_resize(GTK_WINDOW(ow->window), size, size);
 
     GdkDisplay *display = gdk_display_get_default();
@@ -150,6 +234,7 @@ OverlayWindow *overlay_window_new(void) {
 
 void overlay_window_apply_config(OverlayWindow *ow, const CrosshairConfig *cfg) {
     ow->cfg = *cfg;
+    refresh_custom_pixbuf(ow);
     if (!gtk_widget_get_realized(ow->window)) {
         gtk_widget_realize(ow->window);
     }
