@@ -31,6 +31,23 @@ make
 
 Produces `bin/crosshair-overlay`.
 
+## Install (Linux Mint / Ubuntu-based)
+
+```bash
+make install
+```
+
+Installs for the current user only — no `sudo` needed. This builds the app
+(if not already built), copies it to `~/.local/bin/crosshair-overlay`
+(already on your `$PATH` by default on Mint), and adds a "Crosshair
+Overlay" entry to the Cinnamon application menu.
+
+To remove it:
+
+```bash
+make uninstall
+```
+
 ## Run
 
 ```bash
@@ -76,3 +93,7 @@ After building, verify on your actual Linux desktop session:
 - [ ] Quitting and relaunching the app restores your last settings (autosave/reload).
 - [ ] Deleting `~/.config/crosshair-overlay/config.json` and relaunching falls back to defaults (green cross, 100%, centered, Ctrl+Alt+X) instead of crashing.
 - [ ] The "Enabled" checkbox in Options and the tray's Enable/Disable both stay in sync with each other and with the hotkey toggle.
+- [ ] `make install` succeeds without sudo and without errors.
+- [ ] "Crosshair Overlay" appears in the Cinnamon application menu with an icon.
+- [ ] Launching it from the menu, and from a terminal via `crosshair-overlay` (with `~/.local/bin` on `$PATH`), both work.
+- [ ] `make uninstall` removes the binary and the menu entry.

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Crosshair Overlay
+Comment=Lightweight click-through crosshair overlay
+Exec=@HOME@/.local/bin/crosshair-overlay
+Icon=input-mouse
+Terminal=false
+Categories=Utility;

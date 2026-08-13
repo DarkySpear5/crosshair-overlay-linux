@@ -10,7 +10,11 @@ BIN = bin/crosshair-overlay
 TEST_SRC = tests/test_config.c src/config.c
 TEST_BIN = bin/test_config
 
-.PHONY: all clean test
+PREFIX = $(HOME)/.local
+BINDIR = $(PREFIX)/bin
+DESKTOPDIR = $(PREFIX)/share/applications
+
+.PHONY: all clean test install uninstall
 
 all: $(BIN)
 
@@ -29,3 +33,14 @@ test:
 clean:
 	rm -f $(OBJ) $(TEST_BIN)
 	rm -rf bin
+
+install: all
+	@mkdir -p $(BINDIR) $(DESKTOPDIR)
+	install -m 755 $(BIN) $(BINDIR)/crosshair-overlay
+	sed 's|@HOME@|$(HOME)|' crosshair-overlay.desktop > $(DESKTOPDIR)/crosshair-overlay.desktop
+	-update-desktop-database $(DESKTOPDIR) 2>/dev/null
+
+uninstall:
+	rm -f $(BINDIR)/crosshair-overlay
+	rm -f $(DESKTOPDIR)/crosshair-overlay.desktop
+	-update-desktop-database $(DESKTOPDIR) 2>/dev/null
