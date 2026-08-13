@@ -1,7 +1,7 @@
 CC = gcc
 PKGS = gtk+-3.0 x11 xext json-glib-1.0
 CFLAGS = -Wall -Wextra -g $(shell pkg-config --cflags $(PKGS))
-LDFLAGS = $(shell pkg-config --libs $(PKGS))
+LDFLAGS = $(shell pkg-config --libs $(PKGS)) -lm
 
 SRC = src/main.c src/config.c src/overlay_window.c src/tray.c src/options_window.c src/hotkey.c
 OBJ = $(SRC:.c=.o)
