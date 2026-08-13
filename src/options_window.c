@@ -23,6 +23,10 @@ struct _OptionsWindow {
     HotkeyChangedCallback hotkey_changed_cb;
     gpointer hotkey_changed_user_data;
 
+    GtkWidget *enabled_check;
+    EnabledChangedCallback enabled_changed_cb;
+    gpointer enabled_changed_user_data;
+
     gboolean updating_ui; /* guards against feedback loops while syncing widgets to cfg */
 };
 
@@ -321,6 +325,14 @@ static void on_import_clicked(GtkButton *button, gpointer user_data) {
     gtk_widget_destroy(dialog);
 }
 
+static void on_enabled_toggled(GtkToggleButton *button, gpointer user_data) {
+    OptionsWindow *ow = (OptionsWindow *)user_data;
+    if (ow->updating_ui) return;
+    ow->cfg->enabled = gtk_toggle_button_get_active(button);
+    apply_and_save(ow);
+    if (ow->enabled_changed_cb) ow->enabled_changed_cb(ow->enabled_changed_user_data);
+}
+
 static void populate_monitors(OptionsWindow *ow) {
     GdkDisplay *display = gdk_display_get_default();
     int n = gdk_display_get_n_monitors(display);
@@ -430,6 +442,20 @@ OptionsWindow *options_window_new(CrosshairConfig *cfg, OverlayWindow *overlay, 
     gtk_grid_attach(GTK_GRID(grid), io_box, 0, row, 2, 1);
     row++;
 
+    ow->enabled_check = gtk_check_button_new_with_label("Enabled");
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(ow->enabled_check), cfg->enabled);
+    g_signal_connect(ow->enabled_check, "toggled", G_CALLBACK(on_enabled_toggled), ow);
+    gtk_grid_attach(GTK_GRID(grid), ow->enabled_check, 0, row, 2, 1);
+    row++;
+
+    GtkWidget *note = gtk_label_new(
+        "Note: true fullscreen-exclusive games may hide the overlay (a Linux/X11\n"
+        "limitation shared by all overlay tools). Use borderless/windowed-fullscreen.");
+    gtk_label_set_xalign(GTK_LABEL(note), 0.0);
+    gtk_style_context_add_class(gtk_widget_get_style_context(note), "dim-label");
+    gtk_grid_attach(GTK_GRID(grid), note, 0, row, 2, 1);
+    row++;
+
     refresh_hotkey_label(ow);
     refresh_color_widgets(ow);
 
@@ -439,6 +465,17 @@ OptionsWindow *options_window_new(CrosshairConfig *cfg, OverlayWindow *overlay, 
 void options_window_set_hotkey_changed_callback(OptionsWindow *ow, HotkeyChangedCallback cb, gpointer user_data) {
     ow->hotkey_changed_cb = cb;
     ow->hotkey_changed_user_data = user_data;
+}
+
+void options_window_set_enabled_changed_callback(OptionsWindow *ow, EnabledChangedCallback cb, gpointer user_data) {
+    ow->enabled_changed_cb = cb;
+    ow->enabled_changed_user_data = user_data;
+}
+
+void options_window_sync_enabled(OptionsWindow *ow, gboolean enabled) {
+    ow->updating_ui = TRUE;
+    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(ow->enabled_check), enabled);
+    ow->updating_ui = FALSE;
 }
 
 void options_window_present(OptionsWindow *ow) {

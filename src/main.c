@@ -26,7 +26,14 @@ static void on_toggle(gpointer user_data) {
     app->cfg.enabled = !app->cfg.enabled;
     overlay_window_apply_config(app->overlay, &app->cfg);
     tray_icon_set_enabled(app->tray, app->cfg.enabled);
+    options_window_sync_enabled(app->options, app->cfg.enabled);
     save_current_config(app);
+}
+
+static void on_enabled_changed_from_options(gpointer user_data) {
+    AppState *app = (AppState *)user_data;
+    overlay_window_apply_config(app->overlay, &app->cfg);
+    tray_icon_set_enabled(app->tray, app->cfg.enabled);
 }
 
 static void on_options(gpointer user_data) {
@@ -74,6 +81,7 @@ int main(int argc, char **argv) {
 
     app.options = options_window_new(&app.cfg, app.overlay, app.config_path);
     options_window_set_hotkey_changed_callback(app.options, on_hotkey_changed, &app);
+    options_window_set_enabled_changed_callback(app.options, on_enabled_changed_from_options, &app);
 
     app.tray = tray_icon_new(app.cfg.enabled, on_toggle, on_options, on_quit, &app);
 
