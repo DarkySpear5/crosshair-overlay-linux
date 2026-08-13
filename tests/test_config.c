@@ -21,6 +21,11 @@ static void test_defaults(void) {
     CHECK(cfg.cross.r == 0.0 && cfg.cross.g == 1.0 && cfg.cross.b == 0.0, "defaults: cross color is green");
     CHECK(cfg.cross.opacity == 1.0, "defaults: cross opacity");
     CHECK(cfg.hotkey_count == 3, "defaults: hotkey has 3 keys (Ctrl+Alt+X)");
+    CHECK(cfg.cross.outline_enabled == FALSE, "defaults: cross outline off");
+    CHECK(cfg.dot.outline_enabled == FALSE, "defaults: dot outline off");
+    CHECK(cfg.circle.outline_enabled == FALSE, "defaults: circle outline off");
+    CHECK(cfg.cross.outline_thickness == 1.0, "defaults: cross outline thickness");
+    CHECK(cfg.custom_png_base64 == NULL, "defaults: no custom png");
     config_free_contents(&cfg);
 }
 
@@ -65,6 +70,61 @@ static void test_round_trip(void) {
     remove(path);
 }
 
+static void test_outline_round_trip(void) {
+    CrosshairConfig cfg;
+    config_set_defaults(&cfg);
+    cfg.circle.outline_enabled = TRUE;
+    cfg.circle.outline_r = 1.0; cfg.circle.outline_g = 1.0; cfg.circle.outline_b = 1.0;
+    cfg.circle.outline_thickness = 2.5;
+
+    const char *path = "/tmp/crosshair_overlay_test_outline.json";
+    GError *error = NULL;
+    gboolean saved = config_save(&cfg, path, &error);
+    CHECK(saved && error == NULL, "outline: save succeeds");
+    g_clear_error(&error);
+
+    CrosshairConfig loaded;
+    gboolean ok = config_load(&loaded, path, &error);
+    CHECK(ok && error == NULL, "outline: load succeeds");
+    g_clear_error(&error);
+
+    CHECK(loaded.circle.outline_enabled == TRUE, "outline: enabled round-trips");
+    CHECK(loaded.circle.outline_r == 1.0 && loaded.circle.outline_g == 1.0 && loaded.circle.outline_b == 1.0,
+          "outline: color round-trips");
+    CHECK(loaded.circle.outline_thickness > 2.4 && loaded.circle.outline_thickness < 2.6,
+          "outline: thickness round-trips");
+
+    config_free_contents(&cfg);
+    config_free_contents(&loaded);
+    remove(path);
+}
+
+static void test_custom_png_round_trip(void) {
+    CrosshairConfig cfg;
+    config_set_defaults(&cfg);
+    cfg.shape = SHAPE_CUSTOM_PNG;
+    cfg.custom_png_base64 = g_strdup("aGVsbG8gd29ybGQ=");
+
+    const char *path = "/tmp/crosshair_overlay_test_png.json";
+    GError *error = NULL;
+    gboolean saved = config_save(&cfg, path, &error);
+    CHECK(saved && error == NULL, "custom png: save succeeds");
+    g_clear_error(&error);
+
+    CrosshairConfig loaded;
+    gboolean ok = config_load(&loaded, path, &error);
+    CHECK(ok && error == NULL, "custom png: load succeeds");
+    g_clear_error(&error);
+
+    CHECK(loaded.shape == SHAPE_CUSTOM_PNG, "custom png: shape round-trips");
+    CHECK(loaded.custom_png_base64 != NULL && strcmp(loaded.custom_png_base64, "aGVsbG8gd29ybGQ=") == 0,
+          "custom png: base64 round-trips");
+
+    config_free_contents(&cfg);
+    config_free_contents(&loaded);
+    remove(path);
+}
+
 static void test_missing_file_falls_back_to_defaults(void) {
     CrosshairConfig cfg;
     GError *error = NULL;
@@ -94,6 +154,8 @@ static void test_corrupt_file_falls_back_to_defaults(void) {
 int main(void) {
     test_defaults();
     test_round_trip();
+    test_outline_round_trip();
+    test_custom_png_round_trip();
     test_missing_file_falls_back_to_defaults();
     test_corrupt_file_falls_back_to_defaults();
 

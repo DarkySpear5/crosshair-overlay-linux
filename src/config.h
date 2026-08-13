@@ -8,7 +8,8 @@
 typedef enum {
     SHAPE_CROSS = 0,
     SHAPE_DOT,
-    SHAPE_CIRCLE
+    SHAPE_CIRCLE,
+    SHAPE_CUSTOM_PNG
 } CrosshairShape;
 
 typedef struct {
@@ -17,12 +18,18 @@ typedef struct {
     double gap;
     double r, g, b;
     double opacity;
+    gboolean outline_enabled;
+    double outline_r, outline_g, outline_b;
+    double outline_thickness;
 } CrossSettings;
 
 typedef struct {
     double radius;
     double r, g, b;
     double opacity;
+    gboolean outline_enabled;
+    double outline_r, outline_g, outline_b;
+    double outline_thickness;
 } DotSettings;
 
 typedef struct {
@@ -30,6 +37,9 @@ typedef struct {
     double thickness;
     double r, g, b;
     double opacity;
+    gboolean outline_enabled;
+    double outline_r, outline_g, outline_b;
+    double outline_thickness;
 } CircleSettings;
 
 typedef struct {
@@ -44,6 +54,7 @@ typedef struct {
     CircleSettings circle;
     char *hotkey_keys[HOTKEY_MAX_KEYS];
     int hotkey_count;
+    char *custom_png_base64;
 } CrosshairConfig;
 
 void config_set_defaults(CrosshairConfig *cfg);

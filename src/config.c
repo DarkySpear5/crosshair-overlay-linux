@@ -4,6 +4,12 @@
 #include <string.h>
 #include <stdio.h>
 
+static void set_outline_defaults(gboolean *enabled, double *r, double *g, double *b, double *thickness) {
+    *enabled = FALSE;
+    *r = 0.0; *g = 0.0; *b = 0.0;
+    *thickness = 1.0;
+}
+
 void config_set_defaults(CrosshairConfig *cfg) {
     memset(cfg, 0, sizeof(*cfg));
     cfg->enabled = TRUE;
@@ -18,15 +24,23 @@ void config_set_defaults(CrosshairConfig *cfg) {
     cfg->cross.gap = 4;
     cfg->cross.r = 0.0; cfg->cross.g = 1.0; cfg->cross.b = 0.0;
     cfg->cross.opacity = 1.0;
+    set_outline_defaults(&cfg->cross.outline_enabled, &cfg->cross.outline_r, &cfg->cross.outline_g,
+                          &cfg->cross.outline_b, &cfg->cross.outline_thickness);
 
     cfg->dot.radius = 2;
     cfg->dot.r = 0.0; cfg->dot.g = 1.0; cfg->dot.b = 0.0;
     cfg->dot.opacity = 1.0;
+    set_outline_defaults(&cfg->dot.outline_enabled, &cfg->dot.outline_r, &cfg->dot.outline_g,
+                          &cfg->dot.outline_b, &cfg->dot.outline_thickness);
 
     cfg->circle.radius = 8;
     cfg->circle.thickness = 2;
     cfg->circle.r = 0.0; cfg->circle.g = 1.0; cfg->circle.b = 0.0;
     cfg->circle.opacity = 1.0;
+    set_outline_defaults(&cfg->circle.outline_enabled, &cfg->circle.outline_r, &cfg->circle.outline_g,
+                          &cfg->circle.outline_b, &cfg->circle.outline_thickness);
+
+    cfg->custom_png_base64 = NULL;
 
     char *keys[3] = { "Ctrl", "Alt", "X" };
     config_set_hotkey(cfg, keys, 3);
@@ -38,6 +52,8 @@ void config_free_contents(CrosshairConfig *cfg) {
         cfg->hotkey_keys[i] = NULL;
     }
     cfg->hotkey_count = 0;
+    g_free(cfg->custom_png_base64);
+    cfg->custom_png_base64 = NULL;
 }
 
 char *config_default_path(void) {
@@ -58,17 +74,19 @@ void config_set_hotkey(CrosshairConfig *cfg, char * const *keys, int count) {
 
 const char *shape_to_string(CrosshairShape shape) {
     switch (shape) {
-        case SHAPE_CROSS:  return "cross";
-        case SHAPE_DOT:    return "dot";
-        case SHAPE_CIRCLE: return "circle";
-        default:           return "cross";
+        case SHAPE_CROSS:      return "cross";
+        case SHAPE_DOT:        return "dot";
+        case SHAPE_CIRCLE:     return "circle";
+        case SHAPE_CUSTOM_PNG: return "custom_png";
+        default:                return "cross";
     }
 }
 
 gboolean shape_from_string(const char *str, CrosshairShape *out) {
-    if (g_strcmp0(str, "cross") == 0)  { *out = SHAPE_CROSS;  return TRUE; }
-    if (g_strcmp0(str, "dot") == 0)    { *out = SHAPE_DOT;    return TRUE; }
-    if (g_strcmp0(str, "circle") == 0) { *out = SHAPE_CIRCLE; return TRUE; }
+    if (g_strcmp0(str, "cross") == 0)      { *out = SHAPE_CROSS;      return TRUE; }
+    if (g_strcmp0(str, "dot") == 0)        { *out = SHAPE_DOT;        return TRUE; }
+    if (g_strcmp0(str, "circle") == 0)     { *out = SHAPE_CIRCLE;     return TRUE; }
+    if (g_strcmp0(str, "custom_png") == 0) { *out = SHAPE_CUSTOM_PNG; return TRUE; }
     return FALSE;
 }
 
@@ -88,7 +106,9 @@ static void hex_to_color(const char *hex, double *r, double *g, double *b) {
 
 static void build_shape_object(JsonBuilder *b, const char *name, gboolean has_length_thickness_gap,
                                 gboolean has_thickness_only, double length, double thickness, double gap,
-                                double radius, double r, double g, double bl, double opacity) {
+                                double radius, double r, double g, double bl, double opacity,
+                                gboolean outline_enabled, double outline_r, double outline_g, double outline_b,
+                                double outline_thickness) {
     json_builder_set_member_name(b, name);
     json_builder_begin_object(b);
     if (has_length_thickness_gap) {
@@ -105,6 +125,13 @@ static void build_shape_object(JsonBuilder *b, const char *name, gboolean has_le
     json_builder_set_member_name(b, "color"); json_builder_add_string_value(b, hex);
     g_free(hex);
     json_builder_set_member_name(b, "opacity"); json_builder_add_double_value(b, opacity);
+
+    json_builder_set_member_name(b, "outline_enabled"); json_builder_add_boolean_value(b, outline_enabled);
+    char *outline_hex = color_to_hex(outline_r, outline_g, outline_b);
+    json_builder_set_member_name(b, "outline_color"); json_builder_add_string_value(b, outline_hex);
+    g_free(outline_hex);
+    json_builder_set_member_name(b, "outline_thickness"); json_builder_add_double_value(b, outline_thickness);
+
     json_builder_end_object(b);
 }
 
@@ -128,11 +155,17 @@ gboolean config_save(const CrosshairConfig *cfg, const char *path, GError **erro
     json_builder_set_member_name(b, "shape"); json_builder_add_string_value(b, shape_to_string(cfg->shape));
 
     build_shape_object(b, "cross", TRUE, FALSE, cfg->cross.length, cfg->cross.thickness, cfg->cross.gap,
-                        0, cfg->cross.r, cfg->cross.g, cfg->cross.b, cfg->cross.opacity);
+                        0, cfg->cross.r, cfg->cross.g, cfg->cross.b, cfg->cross.opacity,
+                        cfg->cross.outline_enabled, cfg->cross.outline_r, cfg->cross.outline_g,
+                        cfg->cross.outline_b, cfg->cross.outline_thickness);
     build_shape_object(b, "dot", FALSE, FALSE, 0, 0, 0,
-                        cfg->dot.radius, cfg->dot.r, cfg->dot.g, cfg->dot.b, cfg->dot.opacity);
+                        cfg->dot.radius, cfg->dot.r, cfg->dot.g, cfg->dot.b, cfg->dot.opacity,
+                        cfg->dot.outline_enabled, cfg->dot.outline_r, cfg->dot.outline_g,
+                        cfg->dot.outline_b, cfg->dot.outline_thickness);
     build_shape_object(b, "circle", FALSE, TRUE, 0, cfg->circle.thickness, 0,
-                        cfg->circle.radius, cfg->circle.r, cfg->circle.g, cfg->circle.b, cfg->circle.opacity);
+                        cfg->circle.radius, cfg->circle.r, cfg->circle.g, cfg->circle.b, cfg->circle.opacity,
+                        cfg->circle.outline_enabled, cfg->circle.outline_r, cfg->circle.outline_g,
+                        cfg->circle.outline_b, cfg->circle.outline_thickness);
 
     json_builder_set_member_name(b, "hotkey");
     json_builder_begin_array(b);
@@ -140,6 +173,9 @@ gboolean config_save(const CrosshairConfig *cfg, const char *path, GError **erro
         json_builder_add_string_value(b, cfg->hotkey_keys[i]);
     }
     json_builder_end_array(b);
+
+    json_builder_set_member_name(b, "custom_png_base64");
+    json_builder_add_string_value(b, cfg->custom_png_base64 ? cfg->custom_png_base64 : "");
 
     json_builder_end_object(b);
 
@@ -161,6 +197,15 @@ static double get_double_or(JsonObject *obj, const char *key, double fallback) {
 
 static int get_int_or(JsonObject *obj, const char *key, int fallback) {
     return json_object_has_member(obj, key) ? (int)json_object_get_int_member(obj, key) : fallback;
+}
+
+static void load_outline(JsonObject *s, gboolean *outline_enabled, double *outline_r, double *outline_g,
+                          double *outline_b, double *outline_thickness) {
+    if (json_object_has_member(s, "outline_enabled"))
+        *outline_enabled = json_object_get_boolean_member(s, "outline_enabled");
+    *outline_thickness = get_double_or(s, "outline_thickness", *outline_thickness);
+    if (json_object_has_member(s, "outline_color"))
+        hex_to_color(json_object_get_string_member(s, "outline_color"), outline_r, outline_g, outline_b);
 }
 
 gboolean config_load(CrosshairConfig *cfg, const char *path, GError **error) {
@@ -207,6 +252,8 @@ gboolean config_load(CrosshairConfig *cfg, const char *path, GError **error) {
         cfg->cross.opacity = get_double_or(s, "opacity", cfg->cross.opacity);
         if (json_object_has_member(s, "color"))
             hex_to_color(json_object_get_string_member(s, "color"), &cfg->cross.r, &cfg->cross.g, &cfg->cross.b);
+        load_outline(s, &cfg->cross.outline_enabled, &cfg->cross.outline_r, &cfg->cross.outline_g,
+                     &cfg->cross.outline_b, &cfg->cross.outline_thickness);
     }
     if (json_object_has_member(obj, "dot")) {
         JsonObject *s = json_object_get_object_member(obj, "dot");
@@ -214,6 +261,8 @@ gboolean config_load(CrosshairConfig *cfg, const char *path, GError **error) {
         cfg->dot.opacity = get_double_or(s, "opacity", cfg->dot.opacity);
         if (json_object_has_member(s, "color"))
             hex_to_color(json_object_get_string_member(s, "color"), &cfg->dot.r, &cfg->dot.g, &cfg->dot.b);
+        load_outline(s, &cfg->dot.outline_enabled, &cfg->dot.outline_r, &cfg->dot.outline_g,
+                     &cfg->dot.outline_b, &cfg->dot.outline_thickness);
     }
     if (json_object_has_member(obj, "circle")) {
         JsonObject *s = json_object_get_object_member(obj, "circle");
@@ -222,6 +271,8 @@ gboolean config_load(CrosshairConfig *cfg, const char *path, GError **error) {
         cfg->circle.opacity = get_double_or(s, "opacity", cfg->circle.opacity);
         if (json_object_has_member(s, "color"))
             hex_to_color(json_object_get_string_member(s, "color"), &cfg->circle.r, &cfg->circle.g, &cfg->circle.b);
+        load_outline(s, &cfg->circle.outline_enabled, &cfg->circle.outline_r, &cfg->circle.outline_g,
+                     &cfg->circle.outline_b, &cfg->circle.outline_thickness);
     }
 
     if (json_object_has_member(obj, "hotkey")) {
@@ -235,6 +286,12 @@ gboolean config_load(CrosshairConfig *cfg, const char *path, GError **error) {
             }
             config_set_hotkey(cfg, keys, (int)n);
         }
+    }
+
+    if (json_object_has_member(obj, "custom_png_base64")) {
+        const char *s = json_object_get_string_member(obj, "custom_png_base64");
+        g_free(cfg->custom_png_base64);
+        cfg->custom_png_base64 = (s && s[0]) ? g_strdup(s) : NULL;
     }
 
     g_object_unref(parser);
