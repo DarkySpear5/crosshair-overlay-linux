@@ -3,6 +3,7 @@
 #include "overlay_window.h"
 #include "tray.h"
 #include "options_window.h"
+#include "hotkey.h"
 
 typedef struct {
     CrosshairConfig cfg;
@@ -38,6 +39,23 @@ static void on_quit(gpointer user_data) {
     gtk_main_quit();
 }
 
+static void toggle_from_hotkey(gpointer user_data) {
+    on_toggle(user_data);
+}
+
+static void regrab_hotkey(AppState *app) {
+    GError *error = NULL;
+    if (!hotkey_grab(app->cfg.hotkey_keys, app->cfg.hotkey_count, toggle_from_hotkey, app, &error)) {
+        g_warning("Hotkey grab failed: %s", error ? error->message : "unknown error");
+        g_clear_error(&error);
+    }
+}
+
+static void on_hotkey_changed(gpointer user_data) {
+    AppState *app = (AppState *)user_data;
+    regrab_hotkey(app);
+}
+
 int main(int argc, char **argv) {
     gtk_init(&argc, &argv);
 
@@ -55,11 +73,19 @@ int main(int argc, char **argv) {
     overlay_window_apply_config(app.overlay, &app.cfg);
 
     app.options = options_window_new(&app.cfg, app.overlay, app.config_path);
+    options_window_set_hotkey_changed_callback(app.options, on_hotkey_changed, &app);
 
     app.tray = tray_icon_new(app.cfg.enabled, on_toggle, on_options, on_quit, &app);
 
+    if (hotkey_init()) {
+        regrab_hotkey(&app);
+    } else {
+        g_warning("Global hotkey unavailable (not running under X11)");
+    }
+
     gtk_main();
 
+    hotkey_shutdown();
     config_free_contents(&app.cfg);
     g_free(app.config_path);
     return 0;

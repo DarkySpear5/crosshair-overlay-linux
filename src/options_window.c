@@ -1,4 +1,5 @@
 #include "options_window.h"
+#include "hotkey.h"
 
 struct _OptionsWindow {
     GtkWidget *window;
@@ -13,6 +14,13 @@ struct _OptionsWindow {
     GtkWidget *shape_combo;
     GtkWidget *color_button;
     GtkWidget *opacity_scale;
+
+    GtkWidget *hotkey_label;
+    GtkWidget *hotkey_rebind_button;
+    gboolean capturing_hotkey;
+    GPtrArray *captured_keys; /* owns strdup'd key name strings during capture */
+    HotkeyChangedCallback hotkey_changed_cb;
+    gpointer hotkey_changed_user_data;
 
     gboolean updating_ui; /* guards against feedback loops while syncing widgets to cfg */
 };
@@ -113,6 +121,107 @@ static void on_opacity_changed(GtkRange *range, gpointer user_data) {
     apply_and_save(ow);
 }
 
+static char *hotkey_display_string(CrosshairConfig *cfg) {
+    GString *s = g_string_new("");
+    for (int i = 0; i < cfg->hotkey_count; i++) {
+        if (i > 0) g_string_append(s, "+");
+        g_string_append(s, cfg->hotkey_keys[i]);
+    }
+    return g_string_free(s, FALSE);
+}
+
+static void refresh_hotkey_label(OptionsWindow *ow) {
+    char *s = hotkey_display_string(ow->cfg);
+    gtk_label_set_text(GTK_LABEL(ow->hotkey_label), s);
+    g_free(s);
+}
+
+static const char *gdk_keyval_to_hotkey_name(guint keyval) {
+    switch (keyval) {
+        case GDK_KEY_Control_L: case GDK_KEY_Control_R: return "Ctrl";
+        case GDK_KEY_Alt_L: case GDK_KEY_Alt_R: return "Alt";
+        case GDK_KEY_Shift_L: case GDK_KEY_Shift_R: return "Shift";
+        case GDK_KEY_Super_L: case GDK_KEY_Super_R: return "Super";
+        default: return NULL;
+    }
+}
+
+static void array_add_unique(GPtrArray *arr, const char *name) {
+    for (guint i = 0; i < arr->len; i++) {
+        if (g_strcmp0((const char *)g_ptr_array_index(arr, i), name) == 0) return;
+    }
+    g_ptr_array_add(arr, g_strdup(name));
+}
+
+static gboolean on_capture_key_press(GtkWidget *widget, GdkEventKey *event, gpointer user_data) {
+    OptionsWindow *ow = (OptionsWindow *)user_data;
+    if (!ow->capturing_hotkey) return FALSE;
+    (void)widget;
+
+    const char *mod_name = gdk_keyval_to_hotkey_name(event->keyval);
+    if (mod_name) {
+        array_add_unique(ow->captured_keys, mod_name);
+    } else {
+        char *keyname = gdk_keyval_name(gdk_keyval_to_upper(event->keyval));
+        if (keyname) array_add_unique(ow->captured_keys, keyname);
+    }
+
+    GString *preview = g_string_new("");
+    for (guint i = 0; i < ow->captured_keys->len; i++) {
+        if (i > 0) g_string_append(preview, "+");
+        g_string_append(preview, (const char *)g_ptr_array_index(ow->captured_keys, i));
+    }
+    gtk_label_set_text(GTK_LABEL(ow->hotkey_label), preview->str);
+    g_string_free(preview, TRUE);
+    return TRUE;
+}
+
+static gboolean on_capture_key_release(GtkWidget *widget, GdkEventKey *event, gpointer user_data) {
+    (void)event;
+    (void)widget;
+    OptionsWindow *ow = (OptionsWindow *)user_data;
+    if (!ow->capturing_hotkey) return FALSE;
+
+    if (ow->captured_keys->len < 2) {
+        return TRUE;
+    }
+
+    char *keys[HOTKEY_MAX_KEYS];
+    guint n = ow->captured_keys->len > HOTKEY_MAX_KEYS ? HOTKEY_MAX_KEYS : ow->captured_keys->len;
+    for (guint i = 0; i < n; i++) {
+        keys[i] = (char *)g_ptr_array_index(ow->captured_keys, i);
+    }
+
+    config_set_hotkey(ow->cfg, keys, (int)n);
+
+    ow->capturing_hotkey = FALSE;
+    gtk_button_set_label(GTK_BUTTON(ow->hotkey_rebind_button), "Rebind");
+    refresh_hotkey_label(ow);
+    apply_and_save(ow);
+
+    if (ow->hotkey_changed_cb) ow->hotkey_changed_cb(ow->hotkey_changed_user_data);
+
+    for (guint i = 0; i < ow->captured_keys->len; i++) {
+        g_free(g_ptr_array_index(ow->captured_keys, i));
+    }
+    g_ptr_array_set_size(ow->captured_keys, 0);
+
+    return TRUE;
+}
+
+static void on_rebind_clicked(GtkButton *button, gpointer user_data) {
+    OptionsWindow *ow = (OptionsWindow *)user_data;
+    (void)button;
+    ow->capturing_hotkey = TRUE;
+    for (guint i = 0; i < ow->captured_keys->len; i++) {
+        g_free(g_ptr_array_index(ow->captured_keys, i));
+    }
+    g_ptr_array_set_size(ow->captured_keys, 0);
+    gtk_button_set_label(GTK_BUTTON(ow->hotkey_rebind_button), "Press 2+ keys…");
+    gtk_label_set_text(GTK_LABEL(ow->hotkey_label), "");
+    gtk_widget_grab_focus(ow->window);
+}
+
 static void populate_monitors(OptionsWindow *ow) {
     GdkDisplay *display = gdk_display_get_default();
     int n = gdk_display_get_n_monitors(display);
@@ -196,9 +305,31 @@ OptionsWindow *options_window_new(CrosshairConfig *cfg, OverlayWindow *overlay, 
     gtk_grid_attach(GTK_GRID(grid), ow->opacity_scale, 1, row, 1, 1);
     row++;
 
+    ow->captured_keys = g_ptr_array_new();
+    ow->capturing_hotkey = FALSE;
+
+    gtk_grid_attach(GTK_GRID(grid), gtk_label_new("Hotkey"), 0, row, 1, 1);
+    GtkWidget *hotkey_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+    ow->hotkey_label = gtk_label_new("");
+    ow->hotkey_rebind_button = gtk_button_new_with_label("Rebind");
+    g_signal_connect(ow->hotkey_rebind_button, "clicked", G_CALLBACK(on_rebind_clicked), ow);
+    gtk_box_pack_start(GTK_BOX(hotkey_box), ow->hotkey_label, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(hotkey_box), ow->hotkey_rebind_button, FALSE, FALSE, 0);
+    gtk_grid_attach(GTK_GRID(grid), hotkey_box, 1, row, 1, 1);
+    row++;
+
+    g_signal_connect(ow->window, "key-press-event", G_CALLBACK(on_capture_key_press), ow);
+    g_signal_connect(ow->window, "key-release-event", G_CALLBACK(on_capture_key_release), ow);
+
+    refresh_hotkey_label(ow);
     refresh_color_widgets(ow);
 
     return ow;
+}
+
+void options_window_set_hotkey_changed_callback(OptionsWindow *ow, HotkeyChangedCallback cb, gpointer user_data) {
+    ow->hotkey_changed_cb = cb;
+    ow->hotkey_changed_user_data = user_data;
 }
 
 void options_window_present(OptionsWindow *ow) {

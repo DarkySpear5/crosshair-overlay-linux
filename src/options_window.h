@@ -11,4 +11,7 @@ OptionsWindow *options_window_new(CrosshairConfig *cfg, OverlayWindow *overlay, 
 void options_window_present(OptionsWindow *ow);
 GtkWidget *options_window_get_widget(OptionsWindow *ow);
 
+typedef void (*HotkeyChangedCallback)(gpointer user_data);
+void options_window_set_hotkey_changed_callback(OptionsWindow *ow, HotkeyChangedCallback cb, gpointer user_data);
+
 #endif
