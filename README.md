@@ -99,6 +99,6 @@ After building, verify on your actual Linux desktop session:
 - [ ] `make uninstall` removes the binary and the menu entry.
 - [ ] Toggling Outline on/off for the active shape, and changing its color/thickness, is immediately visible on the crosshair.
 - [ ] Switching Shape to "Custom Image" hides Color/Opacity/Outline and shows an "Import PNG…" button instead; switching back to Cross/Dot/Circle restores them with your previous settings intact.
-- [ ] Importing a PNG that is 16x16 or smaller sets it as the crosshair and shows a live preview + dimensions.
-- [ ] Importing a PNG larger than 16x16 shows an error stating the actual size and leaves the current crosshair unchanged.
+- [ ] Importing a PNG that is 64x64 or smaller sets it as the crosshair and shows a live preview + dimensions.
+- [ ] Importing a PNG larger than 64x64 shows an error stating the actual size and leaves the current crosshair unchanged.
 - [ ] Exporting a preset that uses a custom image, then importing it (even on a different machine), reproduces the exact same custom crosshair.

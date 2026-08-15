@@ -46,10 +46,12 @@ static int shape_bounding_size(OverlayWindow *ow) {
     double half;
     double pad = 4;
     switch (cfg->shape) {
-        case SHAPE_CROSS:
-            half = (cfg->cross.length + cfg->cross.gap) * scale;
+        case SHAPE_CROSS: {
+            double outline_extra = cfg->cross.outline_enabled ? cfg->cross.outline_thickness * scale : 0;
+            half = (cfg->cross.length + cfg->cross.gap) * scale + outline_extra;
             if (cfg->cross.outline_enabled) pad += cfg->cross.outline_thickness * scale * 2.0;
             break;
+        }
         case SHAPE_DOT:
             half = cfg->dot.radius * scale;
             if (cfg->dot.outline_enabled) pad += cfg->dot.outline_thickness * scale;
@@ -104,11 +106,12 @@ static gboolean on_draw(GtkWidget *widget, cairo_t *cr, gpointer user_data) {
             cairo_set_line_cap(cr, CAIRO_LINE_CAP_BUTT);
 
             if (ow->cfg.cross.outline_enabled) {
-                double outline_thick = thick + 2.0 * ow->cfg.cross.outline_thickness * scale;
+                double outline_extra = ow->cfg.cross.outline_thickness * scale;
+                double outline_thick = thick + 2.0 * outline_extra;
                 cairo_set_source_rgba(cr, ow->cfg.cross.outline_r, ow->cfg.cross.outline_g,
                                       ow->cfg.cross.outline_b, ow->cfg.cross.opacity);
                 cairo_set_line_width(cr, outline_thick);
-                build_cross_path(cr, cx, cy, len, gap);
+                build_cross_path(cr, cx, cy, len + outline_extra, gap);
                 cairo_stroke(cr);
             }
 

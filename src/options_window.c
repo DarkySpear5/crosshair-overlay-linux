@@ -3,7 +3,7 @@
 #include <json-glib/json-glib.h>
 #include <gdk-pixbuf/gdk-pixbuf.h>
 
-#define MAX_CUSTOM_PNG_SIZE 16
+#define MAX_CUSTOM_PNG_SIZE 64
 
 struct _OptionsWindow {
     GtkWidget *window;
@@ -172,7 +172,12 @@ static void refresh_custom_image_widgets(OptionsWindow *ow) {
     if (pixbuf) {
         int w = gdk_pixbuf_get_width(pixbuf);
         int h = gdk_pixbuf_get_height(pixbuf);
-        GdkPixbuf *scaled = gdk_pixbuf_scale_simple(pixbuf, w * 4, h * 4, GDK_INTERP_NEAREST);
+        double preview_scale = 64.0 / MAX(w, h);
+        int pw = (int)(w * preview_scale + 0.5);
+        int ph = (int)(h * preview_scale + 0.5);
+        if (pw < 1) pw = 1;
+        if (ph < 1) ph = 1;
+        GdkPixbuf *scaled = gdk_pixbuf_scale_simple(pixbuf, pw, ph, GDK_INTERP_NEAREST);
         gtk_image_set_from_pixbuf(GTK_IMAGE(ow->custom_image_preview), scaled);
         g_object_unref(scaled);
         char *label_text = g_strdup_printf("%d x %d loaded", w, h);
@@ -683,7 +688,7 @@ OptionsWindow *options_window_new(CrosshairConfig *cfg, OverlayWindow *overlay, 
     ow->custom_image_label = gtk_label_new("No image loaded");
     gtk_box_pack_start(GTK_BOX(custom_image_box), ow->custom_image_label, FALSE, FALSE, 0);
 
-    GtkWidget *import_png_button = gtk_button_new_with_label("Import PNG… (max 16x16)");
+    GtkWidget *import_png_button = gtk_button_new_with_label("Import PNG… (max 64x64)");
     g_signal_connect(import_png_button, "clicked", G_CALLBACK(on_import_png_clicked), ow);
     gtk_box_pack_start(GTK_BOX(custom_image_box), import_png_button, FALSE, FALSE, 0);
 
