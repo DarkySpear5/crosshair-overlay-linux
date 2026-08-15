@@ -73,15 +73,16 @@ static int shape_bounding_size(OverlayWindow *ow) {
     return size < 8 ? 8 : size;
 }
 
-static void build_cross_path(cairo_t *cr, double cx, double cy, double len, double gap) {
-    cairo_move_to(cr, cx - gap - len, cy);
-    cairo_line_to(cr, cx - gap, cy);
-    cairo_move_to(cr, cx + gap, cy);
-    cairo_line_to(cr, cx + gap + len, cy);
-    cairo_move_to(cr, cx, cy - gap - len);
-    cairo_line_to(cr, cx, cy - gap);
-    cairo_move_to(cr, cx, cy + gap);
-    cairo_line_to(cr, cx, cy + gap + len);
+/* inner/outer are distances from center to the near and far end of each arm. */
+static void build_cross_path(cairo_t *cr, double cx, double cy, double inner, double outer) {
+    cairo_move_to(cr, cx - outer, cy);
+    cairo_line_to(cr, cx - inner, cy);
+    cairo_move_to(cr, cx + inner, cy);
+    cairo_line_to(cr, cx + outer, cy);
+    cairo_move_to(cr, cx, cy - outer);
+    cairo_line_to(cr, cx, cy - inner);
+    cairo_move_to(cr, cx, cy + inner);
+    cairo_line_to(cr, cx, cy + outer);
 }
 
 static gboolean on_draw(GtkWidget *widget, cairo_t *cr, gpointer user_data) {
@@ -108,16 +109,19 @@ static gboolean on_draw(GtkWidget *widget, cairo_t *cr, gpointer user_data) {
             if (ow->cfg.cross.outline_enabled) {
                 double outline_extra = ow->cfg.cross.outline_thickness * scale;
                 double outline_thick = thick + 2.0 * outline_extra;
+                double inner = gap - outline_extra;
+                if (inner < 0) inner = 0;
+                double outer = gap + len + outline_extra;
                 cairo_set_source_rgba(cr, ow->cfg.cross.outline_r, ow->cfg.cross.outline_g,
                                       ow->cfg.cross.outline_b, ow->cfg.cross.opacity);
                 cairo_set_line_width(cr, outline_thick);
-                build_cross_path(cr, cx, cy, len + outline_extra, gap);
+                build_cross_path(cr, cx, cy, inner, outer);
                 cairo_stroke(cr);
             }
 
             cairo_set_source_rgba(cr, ow->cfg.cross.r, ow->cfg.cross.g, ow->cfg.cross.b, ow->cfg.cross.opacity);
             cairo_set_line_width(cr, thick);
-            build_cross_path(cr, cx, cy, len, gap);
+            build_cross_path(cr, cx, cy, gap, gap + len);
             cairo_stroke(cr);
             break;
         }
